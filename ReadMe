@@ -1,0 +1,17 @@
+Simulación de flujo incompresible bidimensional
+
+Simulación numérica de flujo viscoso incompresible bidimensional en un canal con obstáculos rígidos,
+implementada en Python mediante la formulación de función de corriente-vorticidad de las
+ecuaciones de Navier-Stokes en estado estacionario.
+
+## Dominio
+- Canal: 24 × 8 unidades, malla uniforme h = 1
+- Obstáculo 1: esquina superior izquierda, x ∈ [1,6], y ∈ [6,8]
+- Obstáculo 2: centro inferior, x ∈ [16,18], y ∈ [0,4]
+
+## Curso
+Simulación y Computación Numérica — Universidad del Valle, 2026-I
+
+## Integrantes
+Yoel Steven Montoya
+Steven Fernando Aragon

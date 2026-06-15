@@ -15,3 +15,101 @@ Simulación y Computación Numérica — Universidad del Valle, 2026-I
 ## Integrantes
 Yoel Steven Montoya
 Steven Fernando Aragon
+Sebastian Bolaños Morales
+
+## Requisitos previos
+
+Antes de ejecutar el proyecto es necesario tener instalado:
+
+- Python 3.11.9
+- Una herramienta para gestionar versiones de Python (se recomienda **pyenv**)
+- Soporte para creación de entornos virtuales (`venv`)
+
+> Este proyecto fue desarrollado y probado con Python 3.11.9. Se recomienda utilizar esta misma versión para garantizar la compatibilidad.
+
+## Configuración del entorno
+
+### 1. Instalar Python 3.11.9
+
+Si utiliza **pyenv**, instale la versión requerida con:
+
+```bash
+pyenv install 3.11.9
+```
+
+### 2. Establecer la versión de Python para el proyecto
+
+Desde la carpeta raíz del proyecto ejecute:
+
+```bash
+pyenv local 3.11.9
+```
+
+Esto generará el archivo `.python-version` y asegurará que el proyecto utilice la versión correcta de Python.
+
+### 3. Crear el entorno virtual
+
+```bash
+python -m venv venv
+```
+
+### 4. Activar el entorno virtual
+
+#### Windows (PowerShell)
+
+```powershell
+.\venv\Scripts\Activate.ps1
+```
+
+#### Windows (Git Bash)
+
+```bash
+source venv/Scripts/activate
+```
+
+#### Linux / macOS
+
+```bash
+source venv/bin/activate
+```
+
+### 5. Verificar la versión de Python
+
+```bash
+python --version
+```
+
+La salida debe ser:
+
+```text
+Python 3.11.9
+```
+
+## Ejecución del proyecto
+
+Una vez configurado y activado el entorno virtual, ejecute la simulación desde la carpeta raíz del proyecto:
+
+```bash
+python Simulacion.py
+```
+
+## Resumen rápido
+
+```bash
+# Instalar la versión requerida
+pyenv install 3.11.9
+
+# Establecer la versión del proyecto
+pyenv local 3.11.9
+
+# Crear el entorno virtual
+python -m venv venv
+
+# Activar el entorno virtual (Git Bash)
+source venv/Scripts/activate
+
+# Ejecutar la simulación
+python Simulacion.py
+```
+
+> **Importante:** Antes de ejecutar la simulación asegúrese de tener activado el entorno virtual. De lo contrario, podrían presentarse errores relacionados con dependencias o versiones incompatibles de Python.

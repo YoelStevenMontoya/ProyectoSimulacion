@@ -6,7 +6,6 @@ Corregidos errores de plotting y se añadió line search.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.linalg import solve
 
 # ============================================================
 # 1. PARÁMETROS FÍSICOS Y NUMÉRICOS (malla aún más pequeña)
@@ -194,60 +193,98 @@ def jacobian_numerical(psi, omega, eps=1e-7):
     return J
 
 # ============================================================
-# 5. NEWTON-RAPHSON CON LINE SEARCH
+# 5. GAUSS-SEIDEL PARA ψ Y ω (reemplaza scipy.linalg.solve)
+# ============================================================
+def gauss_seidel_psi(psi, omega, tol=1e-7, max_iter=3000):
+    """Resuelve ∇²ψ = -ω por Gauss-Seidel."""
+    p = psi.copy()
+    for _ in range(max_iter):
+        p_old = p.copy()
+        # Condiciones de frontera
+        for j in range(ny):
+            p[0, j] = U_inlet * y[j]
+        p[-1, :] = p[-2, :]
+        p[:, 0] = 0.0
+        p[:, -1] = U_inlet * Ly
+        p[~fluid] = 0.0
+        # Nodos interiores
+        for i in range(1, nx-1):
+            for j in range(1, ny-1):
+                if fluid[i, j]:
+                    p[i, j] = (
+                        (p[i+1,j] + p[i-1,j]) / dx**2 +
+                        (p[i,j+1] + p[i,j-1]) / dy**2 +
+                        omega[i, j]
+                    ) / (2/dx**2 + 2/dy**2)
+        if np.linalg.norm(p - p_old) < tol:
+            break
+    return p
+
+def gauss_seidel_omega(psi, omega, u, v, tol=1e-7, max_iter=3000):
+    """Resuelve ν∇²ω = u·∂ω/∂x + v·∂ω/∂y por Gauss-Seidel con upwind."""
+    om = omega.copy()
+    for _ in range(max_iter):
+        om_old = om.copy()
+        # Condiciones de frontera
+        for i in range(1, nx-1):
+            om[i, 0]    = -2.0 * psi[i, 1] / dy**2       if fluid[i, 1]    else 0.0
+            om[i, ny-1] = -2.0 * (psi[i, ny-2] - U_inlet*Ly) / dy**2 if fluid[i, ny-2] else 0.0
+        om[0, :] = 0.0
+        om[-1, :] = om[-2, :]
+        om[~fluid] = 0.0
+        # Nodos interiores
+        for i in range(1, nx-1):
+            for j in range(1, ny-1):
+                if fluid[i, j]:
+                    a = nu * (2/dx**2 + 2/dy**2)
+                    rhs = nu * (om[i+1,j] + om[i-1,j]) / dx**2 + \
+                          nu * (om[i,j+1] + om[i,j-1]) / dy**2
+                    if u[i,j] > 0:
+                        rhs -= u[i,j] * om[i-1,j] / dx
+                        a   += u[i,j] / dx
+                    else:
+                        rhs -= u[i,j] * om[i+1,j] / dx
+                        a   -= u[i,j] / dx
+                    if v[i,j] > 0:
+                        rhs -= v[i,j] * om[i,j-1] / dy
+                        a   += v[i,j] / dy
+                    else:
+                        rhs -= v[i,j] * om[i,j+1] / dy
+                        a   -= v[i,j] / dy
+                    if abs(a) > 1e-14:
+                        om[i, j] = rhs / a
+        if np.linalg.norm(om - om_old) < tol:
+            break
+    return om
+
+# ============================================================
+# 6. ITERACIÓN ACOPLADA ψ → ω (Newton-Raphson estilo operador)
 # ============================================================
 apply_bc(psi, omega)
-print("Iniciando Newton-Raphson con line search...")
+print("Iniciando iteración acoplada con Gauss-Seidel...")
 print(f"Malla: {nx} x {ny} = {nx*ny} nodos → {2*nx*ny} incógnitas")
 
 residual_norm = []
 for it in range(max_iter):
-    R = residual(psi, omega)
-    normR = np.linalg.norm(R)
-    residual_norm.append(normR)
-    print(f"Iter {it+1:2d}: ||R|| = {normR:.3e}")
+    psi_old   = psi.copy()
+    omega_old = omega.copy()
 
-    if normR < tol:
+    # Paso 1: resolver ψ con GS dado ω
+    psi = gauss_seidel_psi(psi, omega)
+
+    # Paso 2: actualizar velocidades
+    u, v = compute_velocities(psi)
+
+    # Paso 3: resolver ω con GS dado u, v, ψ
+    omega = gauss_seidel_omega(psi, omega, u, v)
+
+    # Convergencia global
+    diff = max(np.linalg.norm(psi - psi_old), np.linalg.norm(omega - omega_old))
+    residual_norm.append(diff)
+    print(f"Iter {it+1:2d}: ||Δ|| = {diff:.3e}")
+
+    if diff < tol:
         print("Convergencia alcanzada.")
-        break
-
-    # Jacobiano
-    print("   Calculando Jacobiano numérico...")
-    J = jacobian_numerical(psi, omega, eps=eps_jac)
-
-    # Resolver sistema
-    print("   Resolviendo sistema lineal...")
-    delta = solve(J, -R)
-
-    # Line search: reducir paso si empeora el residual
-    alpha = alpha_init
-    psi_try = psi.copy()
-    omega_try = omega.copy()
-    for _ in range(8):  # máximo 8 reducciones
-        # Actualizar prueba
-        for var in range(2*nx*ny):
-            node = var // 2
-            i = node // ny
-            j = node % ny
-            comp = var % 2
-            if comp == 0:
-                psi_try[i,j] = psi[i,j] + alpha * delta[var]
-            else:
-                omega_try[i,j] = omega[i,j] + alpha * delta[var]
-        apply_bc(psi_try, omega_try)
-        R_try = residual(psi_try, omega_try)
-        norm_try = np.linalg.norm(R_try)
-        if norm_try < normR:
-            # Aceptamos el paso
-            psi, omega = psi_try, omega_try
-            print(f"   Paso aceptado con alpha = {alpha:.3f} (||R|| nuevo = {norm_try:.3e})")
-            break
-        else:
-            alpha *= 0.5
-            psi_try = psi.copy()
-            omega_try = omega.copy()
-    else:
-        print("   No se encontró paso que reduzca el residual. Se detiene.")
         break
 
 print("\nSimulación finalizada.")
@@ -256,44 +293,55 @@ print("\nSimulación finalizada.")
 # 6. VISUALIZACIÓN (corregida)
 # ============================================================
 u_final, v_final = compute_velocities(psi)
+speed = np.sqrt(u_final**2 + v_final**2)
 
-plt.figure(figsize=(14,10))
+# Enmascarar obstáculos
+psi_plot   = np.ma.masked_where(~fluid, psi)
+omega_plot = np.ma.masked_where(~fluid, omega)
+speed_plot = np.ma.masked_where(~fluid, speed)
 
-# Para graficar correctamente: contourf espera X, Y con la misma forma que psi.
-# Como X e Y tienen forma (nx, ny) y psi también, usamos psi directamente (sin transponer).
-plt.subplot(2,2,1)
-cf1 = plt.contourf(X, Y, psi, levels=30, cmap='jet')
-plt.colorbar(cf1)
-plt.title("Función corriente ψ")
-plt.xlabel("x"); plt.ylabel("y")
+# Meshgrid para graficar: sin indexing='ij' → forma (ny, nx) que espera contourf
+Xp, Yp = np.meshgrid(x, y)
 
-plt.subplot(2,2,2)
-cf2 = plt.contourf(X, Y, omega, levels=30, cmap='coolwarm')
-plt.colorbar(cf2)
-plt.title("Vorticidad ω")
-plt.xlabel("x"); plt.ylabel("y")
+# Transponer datos a (ny, nx)
+psi_T   = psi_plot.T
+omega_T = omega_plot.T
+speed_T = speed_plot.T
+u_T     = u_final.T
+v_T     = v_final.T
 
-# Campo de velocidades (cada 2 puntos)
-plt.subplot(2,2,3)
-skip = 2
-plt.quiver(X[::skip, ::skip], Y[::skip, ::skip],
-           u_final[::skip, ::skip], v_final[::skip, ::skip], scale=25)
-plt.title("Campo de velocidades")
-plt.xlabel("x"); plt.ylabel("y")
-
-# Líneas de corriente
-plt.subplot(2,2,4)
-plt.contour(X, Y, psi, levels=30, colors='k', linewidths=0.8)
-plt.title("Líneas de corriente")
-plt.xlabel("x"); plt.ylabel("y")
-
-# Dibujar obstáculos en todas las subfiguras
-for ax in [plt.subplot(2,2,1), plt.subplot(2,2,2), plt.subplot(2,2,3), plt.subplot(2,2,4)]:
-    # Obstáculo 1
-    ax.fill_betweenx([oy1_start, oy1_end], ox1_start, ox1_end, color='gray', alpha=0.6)
-    # Obstáculo 2
-    ax.fill_betweenx([oy2_start, oy2_end], ox2_start, ox2_end, color='gray', alpha=0.6)
+def add_obstacles(ax):
+    ax.fill_betweenx([oy1_start, oy1_end], ox1_start, ox1_end, color='gray', alpha=0.7)
+    ax.fill_betweenx([oy2_start, oy2_end], ox2_start, ox2_end, color='gray', alpha=0.7)
     ax.set_xlim(0, Lx); ax.set_ylim(0, Ly)
+
+fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+
+ax = axes[0, 0]
+cf1 = ax.contourf(Xp, Yp, psi_T, levels=np.linspace(float(psi_T.min()), float(psi_T.max()), 30), cmap='jet')
+fig.colorbar(cf1, ax=ax); ax.set_title("Función corriente ψ")
+ax.set_xlabel("x"); ax.set_ylabel("y"); add_obstacles(ax)
+
+ax = axes[0, 1]
+cf2 = ax.contourf(Xp, Yp, omega_T, levels=np.linspace(float(omega_T.min()), float(omega_T.max()), 30), cmap='coolwarm')
+fig.colorbar(cf2, ax=ax); ax.set_title("Vorticidad ω")
+ax.set_xlabel("x"); ax.set_ylabel("y"); add_obstacles(ax)
+
+ax = axes[0, 2]
+cf3 = ax.contourf(Xp, Yp, speed_T, levels=np.linspace(float(speed_T.min()), float(speed_T.max()), 40), cmap='inferno')
+cb3 = fig.colorbar(cf3, ax=ax); cb3.set_label('|v| = √(u²+v²)')
+ax.set_title("Mapa de calor: magnitud de velocidad |v|")
+ax.set_xlabel("x"); ax.set_ylabel("y"); add_obstacles(ax)
+
+ax = axes[1, 0]; skip = 2
+ax.quiver(Xp[::skip, ::skip], Yp[::skip, ::skip], u_T[::skip, ::skip], v_T[::skip, ::skip], scale=25)
+ax.set_title("Campo de velocidades"); ax.set_xlabel("x"); ax.set_ylabel("y"); add_obstacles(ax)
+
+ax = axes[1, 1]
+ax.contour(Xp, Yp, psi_T, levels=30, colors='k', linewidths=0.8)
+ax.set_title("Líneas de corriente"); ax.set_xlabel("x"); ax.set_ylabel("y"); add_obstacles(ax)
+
+axes[1, 2].set_visible(False)
 
 plt.tight_layout()
 plt.show()
@@ -301,8 +349,8 @@ plt.show()
 # Gráfica de convergencia
 plt.figure()
 plt.semilogy(residual_norm, 'o-')
-plt.xlabel("Iteración de Newton")
+plt.xlabel("Iteración")
 plt.ylabel("Norma del residual")
-plt.title("Convergencia de Newton-Raphson")
+plt.title("Convergencia de Gauss-Seidel acoplado")
 plt.grid(True)
 plt.show()
